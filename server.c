@@ -25,6 +25,10 @@
 #include "safeUtil.h"
 #include "pdu.h"
 #include "pollLib.h"
+#include "pduFlags.h"
+#include "safePDU.h"
+
+#include "printBytes.h"
 
 #define MAXBUF 1024
 #define DEBUG_FLAG 1
@@ -89,19 +93,18 @@ void processClient(int clientSocket)
 	int messageLen = 0;
 	
 	//now get the data from the client_socket
-	if ((messageLen = recvPDU(clientSocket, dataBuffer, MAXBUF)) < 0)
-	{
-		perror("recv call");
-		exit(-1);
-	}
-
+	messageLen = safeRecvPDU(clientSocket, dataBuffer, MAXBUF);
 	if (messageLen > 0)
 	{
-		printf("Socket %d: Message received, length: %d Data: %s\n", clientSocket, messageLen, dataBuffer);
+		// TODO: Error checking
+		uint8_t flag = dataBuffer[0];
+		printf("Socket %d: Message received, length: %d, Flag: %hhu Data: ", clientSocket, messageLen, flag);
+		printBytes(dataBuffer, messageLen);
 		
-		// send it back to client (just to test sending is working... e.g. debugging)
-		messageLen = sendPDU(clientSocket, dataBuffer, messageLen);
-		printf("Socket %d: msg sent: %d bytes, text: %s\n", clientSocket, messageLen, dataBuffer);
+		// // send it back to client (just to test sending is working... e.g. debugging)
+		uint8_t new_data_buffer = PDU_ACCEPT;
+		messageLen = sendPDU(clientSocket, &new_data_buffer, 1);
+		printf("Socket %d: msg sent: %d bytes, text: %s\n", clientSocket, messageLen, &new_data_buffer);
 	}
 	else
 	{
@@ -116,8 +119,6 @@ void recvFromClient(int clientSocket)
 
 
 }
-
-
 
 int checkArgs(int argc, char *argv[])
 {
