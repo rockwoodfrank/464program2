@@ -27,6 +27,8 @@
 #include "pollLib.h"
 #include "pduFlags.h"
 #include "safePDU.h"
+#include "handleTable.h"
+#include "getPDUdata.h"
 
 #include "printBytes.h"
 
@@ -38,6 +40,11 @@ int checkArgs(int argc, char *argv[]);
 void serverControl(int portNumber);
 void addNewSocket(int mainServerSocket);
 void processClient(int clientSocket);
+void handle_msg(uint8_t *packet, int packetLen, int send_sock);
+void processPacket(uint8_t *packet, int packetLen, int recv_sock);
+void connect_Client(char *conn_handle, int recv_sock);
+void route_cast(uint8_t* packet, int packetLen);
+int get_handles(uint8_t *packet, int *socks);
 
 int main(int argc, char *argv[])
 {
@@ -62,6 +69,9 @@ void serverControl(int portNumber)
 	// add main server socket to poll set.
 	setupPollSet();
 	addToPollSet(mainServerSocket);
+
+	// Creating the handle table
+	init_handle_table();
 
 	// While (1)
 	while (1)
@@ -96,15 +106,7 @@ void processClient(int clientSocket)
 	messageLen = safeRecvPDU(clientSocket, dataBuffer, MAXBUF);
 	if (messageLen > 0)
 	{
-		// TODO: Error checking
-		uint8_t flag = dataBuffer[0];
-		printf("Socket %d: Message received, length: %d, Flag: %hhu Data: ", clientSocket, messageLen, flag);
-		printBytes(dataBuffer, messageLen);
-		
-		// // send it back to client (just to test sending is working... e.g. debugging)
-		uint8_t new_data_buffer = PDU_ACCEPT;
-		messageLen = sendPDU(clientSocket, &new_data_buffer, 1);
-		printf("Socket %d: msg sent: %d bytes, text: %s\n", clientSocket, messageLen, &new_data_buffer);
+		processPacket(dataBuffer, messageLen, clientSocket);
 	}
 	else
 	{
@@ -114,10 +116,93 @@ void processClient(int clientSocket)
 	}
 }
 
-void recvFromClient(int clientSocket)
+void processPacket(uint8_t *packet, int packetLen, int recv_sock)
 {
+	// TODO: Error checking
+	uint8_t conn_handle[MAX_HANDLE_LENGTH];
+	uint8_t flag = *(get_flag(packet));
+	uint8_t handle_len = *(get_src_len(packet));
+	memcpy(conn_handle, get_src(packet), handle_len);
+	// Append a null character
+	conn_handle[handle_len] = '\0';
+	// A switch case as for what to do next
+	if (flag == PDU_CONNECT)
+	{
+		connect_Client(conn_handle, recv_sock);
+	}
+	else if (flag == PDU_BROADCAST)
+	{
+		//
+	}
+	else if (flag == PDU_HANDLES)
+	{
+		//
+	}
+	else if (flag == PDU_UNICAST || flag == PDU_MULTICAST)
+	{
+		route_cast(packet, packetLen);
+	}
+	else
+	{
+		// Throw an error
+		// Quit the server?
+	}
+	// printf("Socket %d: Message received, length: %d, Flag: %hhu Data: ", clientSocket, messageLen, flag);
+	// printBytes(dataBuffer, messageLen);
+	
+	// messageLen = sendPDU(clientSocket, &new_data_buffer, 1);
+	// printf("Socket %d: msg sent: %d bytes, text: %s\n", clientSocket, messageLen, &new_data_buffer);
+}
 
+void connect_Client(char *conn_handle, int recv_sock)
+{
+	printf("Connecting a new client with handle %s\n", conn_handle);
+	uint8_t response;
+	// Connection code
+	// make sure the handle isn't already in the table
+	if (lookup_handle_byname(conn_handle) != -1)
+	{
+		response = PDU_REJECT;
+		printf("Client attempted to connect with duplicate handle.\n");
+		uint8_t response = PDU_REJECT;
+		sendPDU(recv_sock, &response, 1);
+	}
+	// Adding to handle table
+	else
+	{
+		add_handle(conn_handle, recv_sock);
+		response = PDU_ACCEPT;
+		sendPDU(recv_sock, &response, 1);
+	}
+}
 
+void route_cast(uint8_t* packet, int packetLen)
+{
+	int send_socks[9];
+	int num_socks;
+	// Get the handles that we're sending to
+	num_socks = get_handles(packet, send_socks);
+
+	// TODO: Check that they're real
+
+	// For each handle, send the packet
+	for (int i = 0; i < num_socks; i++)
+		sendPDU(send_socks[i], packet, packetLen);
+}
+
+int get_handles(uint8_t *packet, int *socks)
+{
+	int num_handles = *(get_num_dests(packet));
+	for (int i = 0; i < num_handles; i++)
+	{
+		int h_len = *(get_nth_dest_len(packet, i));
+		uint8_t h_name[MAX_HANDLE_LENGTH];
+		memcpy(h_name, get_nth_dest(packet, i), h_len);
+		// Add a null terminator
+		h_name[h_len] = '\0';
+		socks[i] = lookup_handle_byname(h_name);
+	}
+	return num_handles;
 }
 
 int checkArgs(int argc, char *argv[])

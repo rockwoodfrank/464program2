@@ -10,7 +10,7 @@ int     tableSize;
 
 void grow_handle_table();
 
-// Initializing the table - this returns t
+// Initializing the table
 void init_handle_table()
 {
     tableSize = DEFAULT_TABLE_SIZE;
@@ -37,7 +37,10 @@ void remove_handle_table()
     free(sockets);
 }
 
-// Needs to handle lookup by name
+/*  
+    Gets the corresponding socket for a handle name.
+    returns a -1 if the socket doesn't exist
+*/
 int lookup_handle_byname(char *name)
 {
     // Linear search
@@ -58,7 +61,8 @@ char* lookup_handle_bysock(int sock)
 }
 
 
-// Adding and removing
+// Add a value to the handle table. Returns 0 on success.
+// Will grow the handle table if too many values.
 int add_handle(char* name, int socketNum)
 {
     int tablePos = -1;

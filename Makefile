@@ -5,7 +5,7 @@ CC= gcc
 CFLAGS= -g -Wall -std=gnu99
 LIBS = 
 
-OBJS = networks.o gethostbyname.o pollLib.o safeUtil.o pdu.o safePDU.o printBytes.o
+OBJS = networks.o gethostbyname.o pollLib.o safeUtil.o pdu.o safePDU.o printBytes.o handleTable.o getPDUdata.o commandParse.o
 
 all:   cClient server
 
@@ -21,11 +21,14 @@ server: server.c $(OBJS)
 pdu: pdu.c
 	$(CC) $(CFLAGS) -c pdu.c
 
-handleTable: handleTable.c
-	$(CC) $(CFLAGS) -c handleTable.c
-
 handleTableTests: handleTable
 	$(CC) $(CFLAGS) -o handleTableTests handleTableTests.c handleTable.o
+
+getPDUdataTests: getPDUdata.o getPDUdataTests.c
+	$(CC) $(CFLAGS) -o getPDUdataTests getPDUdataTests.c getPDUdata.o
+
+commandParseTests: commandParse.o commandParseTests.c printBytes.o
+	$(CC) $(CFLAGS) -o commandParseTests commandParseTests.c commandParse.o printBytes.o
 
 cleano:
 	rm -f *.o

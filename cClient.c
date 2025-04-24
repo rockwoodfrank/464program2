@@ -29,6 +29,8 @@
 #include "pollLib.h"
 #include "pduFlags.h"
 #include "printBytes.h"
+#include "getPDUdata.h"
+#include "commandParse.h"
 
 #define MAXBUF 1024
 #define DEBUG_FLAG 1
@@ -41,17 +43,15 @@ int readFromStdin(uint8_t * buffer);
 void checkArgs(int argc, char * argv[]);
 void clientControl(char* clientHandle, char* serverName, char* serverPort);
 void processStdIn(int socketNum, char *c_handle);
-int genPackets(int socketNum, char *c_handle, uint8_t *input_buffer, int input_len, uint8_t msgFlag);
-int parseCommand(uint8_t* userInput, int inputLen);
+int genPackets(int socketNum, char *c_handle, Command *command);
+// int parseCommand(uint8_t* userInput, int inputLen);
 void processMsgFromServer(int socketNum);
 int sendConnect(int socketNum, char *handle, int h_len);
 void initConnection(char *handleName, int handleLen, int socketNum);
 int getConnectResp(int socketNum);
 int formatPacket(uint8_t *packet, uint8_t flag, uint8_t h_len, uint8_t *header);
-int appendHandle(uint8_t * stream, uint8_t *handle);
-int getNextHandle(uint8_t *stream, uint8_t *dest);
-int addDestHandles(uint8_t msgFlag, uint8_t *in_buf, int *in_buf_pos, uint8_t *out_buf);
-int sendCast(int socketNum, uint8_t *cast_header, int cast_len, uint8_t *payload_buffer, int payload_len);
+int addDestHandles(Command *command, uint8_t *out_buf);
+int sendCast(int socketNum, uint8_t *cast_header, int cast_len, Command *command, int payload_len);
 
 
 int main(int argc, char * argv[])
@@ -89,7 +89,7 @@ void clientControl(char* clientHandle, char* serverName, char* serverPort)
 		if (readyFD == STDIN_FILENO)
 		{
 			processStdIn(socketNum, clientHandle);
-			printf("Enter data: ");
+			printf("$: ");
 			fflush(stdout);
 		}
 		else if (readyFD == socketNum)
@@ -108,14 +108,15 @@ void processStdIn(int socketNum, char *c_handle)
 
 	// TODO: Handling messages larger than 1400 characters
 	stdin_len = readFromStdin(stdin_buffer);
-	msgFlag = parseCommand(stdin_buffer, stdin_len);
-	if (msgFlag != 0)
+	Command currentCommand;
+	commandParse(stdin_buffer, stdin_len, &currentCommand);
+	if (currentCommand.flag != 0)
 	{
-		genPackets(socketNum, c_handle, &(stdin_buffer[3]), stdin_len-3, msgFlag);
+		genPackets(socketNum, c_handle, &currentCommand);
 	}
 }
 
-int genPackets(int socketNum, char *c_handle, uint8_t *input_buffer, int input_len, uint8_t msgFlag)
+int genPackets(int socketNum, char *c_handle, Command *command)
 {
 	uint8_t packet_buffer[MAXBUF];	// The buffer of information to be put to sendPDU
 	int packet_len = 0;				// The position of the end of the buffer
@@ -124,50 +125,50 @@ int genPackets(int socketNum, char *c_handle, uint8_t *input_buffer, int input_l
 	int sent = 0;
 
 	// Append the message flag 
-	memcpy(packet_buffer, &msgFlag, sizeof(uint8_t));
+	memcpy(get_flag(packet_buffer), &(command->flag), sizeof(uint8_t));
 	packet_len += 1;
-	// Append the client handle
-	int h_len = appendHandle(&(packet_buffer[1]), c_handle);
+	// Append the client handle's length
+	uint8_t h_len = strlen(c_handle);
+	memcpy(get_src_len(packet_buffer), &h_len, sizeof(uint8_t));
+	memcpy(get_src(packet_buffer), c_handle, sizeof(uint8_t) * h_len);
 	packet_len += h_len;
 
 
-	if (msgFlag == PDU_HANDLES)
+	if (command->flag == PDU_HANDLES)
 	{
 		// Null terminate the string and send it
-		memcpy(&(packet_buffer[packet_len]), &nullChar, sizeof(uint8_t));
+		memcpy(get_msg(packet_buffer), &nullChar, sizeof(uint8_t));
 		packet_len++;
-		sent =  safeSendPDU(socketNum, packet_buffer, packet_len );
+		sent =  safeSendPDU(socketNum, packet_buffer, packet_len);
 	}
 	else
 	{
 		// If it's a unicast or a multicast
-		if (msgFlag == PDU_UNICAST || msgFlag == PDU_MULTICAST)
+		if (command->flag == PDU_UNICAST || command->flag == PDU_MULTICAST)
 		{
-			packet_len += addDestHandles(msgFlag, input_buffer, &input_pos, &(packet_buffer[packet_len]));
+			packet_len += addDestHandles(command, packet_buffer);
 		}
-		printBytes(packet_buffer, 25);
-		printf("Packet length is %d\n", packet_len);
 		// Get the message size and send multiple if needed
-		int remainingData = input_len - input_pos;
+		int msgLen = command->msgLen;
 		// Becuase the greatest message size if 200 bytes, break it up if needed
 		// TODO: Handling a message that's exactly 200 bytes long(ends w/ a null character)
-		int packetsToSend = (remainingData / 200) + 1;
+		int packetsToSend = (msgLen / 200) + 1;
 		for (int i = 0; i < packetsToSend; i++)
 		{
 			// TODO: Break thsi up into 200-sized chunks
-			sent += sendCast(socketNum, packet_buffer, packet_len, &(input_buffer[input_pos]), remainingData);
+			sent += sendCast(socketNum, packet_buffer, packet_len, command, msgLen);
 		}
 	}
 	return sent;
 }
 
-int sendCast(int socketNum, uint8_t *cast_header, int cast_len, uint8_t *payload_buffer, int payload_len)
+int sendCast(int socketNum, uint8_t *cast_header, int cast_len, Command *command, int payload_len)
 {
 		// Copy over the heading info
 		uint8_t sending_buffer[cast_len + 200];
 		memcpy(sending_buffer, cast_header, sizeof(uint8_t) * cast_len);
 		// Append the message
-		memcpy(&(sending_buffer[cast_len]), payload_buffer, sizeof(uint8_t) * payload_len);
+		memcpy(get_msg(sending_buffer), command->msg, sizeof(uint8_t) * payload_len);
 		// stdin_pos += dataToSend;
 		// sending_pos += dataToSend;
 		// // Null terminate the string - TODO: if necessary?
@@ -180,31 +181,23 @@ int sendCast(int socketNum, uint8_t *cast_header, int cast_len, uint8_t *payload
 /* 	Add destination handles to the buffer, starting at the top.
 	Assumes that it can write anywhere in the buffer.
 	Returns the amount of bytes added. */
-int addDestHandles(uint8_t msgFlag, uint8_t *in_buf, int *in_buf_pos, uint8_t *out_buf)
+int addDestHandles(Command *command, uint8_t *out_buf)
 {
-	uint8_t num_handles = 0;
+	uint8_t num_handles = command->destsLen;
 	int out_buf_len = 0;
-	// If it's a multicast, get the number of handles from the string
-	if (msgFlag == PDU_MULTICAST)
-	{
-		// Converts the char to a number
-		// TODO: Verifying the input is a number so that the program doesn't segfault
-		num_handles = in_buf[0] - '0';
-		*in_buf_pos += 2;
-	}
-	// Otherwise, the number of handles is one.
-	else num_handles = 1;
+	// TODO: Verifying the input is a number so that the program doesn't segfault
 	// Append this to the string
-	memcpy(out_buf, &num_handles, sizeof(uint8_t));
+	memcpy(get_num_dests(out_buf), &num_handles, sizeof(uint8_t));
 	out_buf_len ++;
 	// Append each handle
 	for (int i = 0; i < num_handles; i++)
 	{
-		uint8_t nextHandle[MAX_HANDLE_NAME];
-		uint8_t nextHandleLen = getNextHandle(&(in_buf[*in_buf_pos]), nextHandle);
-		// Go up by the handle's length and then one for the space
-		*in_buf_pos += nextHandleLen + 1;
-		out_buf_len += appendHandle(&(out_buf[out_buf_len]), nextHandle);
+		// Copy over the length of the handle
+		memcpy(get_nth_dest_len(out_buf, i), command->lengths[0], sizeof(uint8_t));
+		// Copy over the handle
+		memcpy(get_nth_dest(out_buf, i), command->dests[0], sizeof(uint8_t) * command->lengths[0]);
+		// Appending the length of the new handle plus 1 for its length
+		out_buf_len += *(get_nth_dest_len(out_buf, i)) + 1;
 	}
 	return out_buf_len;
 }
@@ -309,74 +302,4 @@ int getConnectResp(int socketNum)
 	}
 	// 2? allow connection
 	else return serverResp;
-}
-
-// Parse the user's input and figure out what to do next
-int parseCommand(uint8_t* userInput, int inputLen)
-{
-	// Verify the input is at least 3(%x + null) characters
-	// and verify the input begins with a percent sign
-	if (inputLen < 3 || userInput[0] != '%')
-	{
-		printf("Enter a commanded preceded by %%.\n");
-		return 0;
-	}
-	// %M - Messsages
-	if (userInput[1] == 'M' || userInput[1] == 'm')
-		return PDU_UNICAST;
-	// %B - Broadcast
-	else if (userInput[1] == 'B' || userInput[1] == 'b')
-		return PDU_BROADCAST;
-	// %C - Multicast
-	else if (userInput[1] == 'C' || userInput[1] == 'c')
-		return PDU_MULTICAST;
-	// %L - List
-	else if (userInput[1] == 'L' || userInput[1] == 'l')
-		return PDU_HANDLES;
-	else 
-	{
-		printf("Enter %%M, %%B, %%C, or %%L.\n");
-		return 0;
-	}
-}
-
-// Add the flag number, length of handle, and client handle. Returns
-// the length of the added data
-// int formatPacket(uint8_t *packet, uint8_t flag, uint8_t h_len, uint8_t *header)
-// {
-// 	// The flag
-// 	memcpy(packet, &flag, sizeof(uint8_t));
-// 	// The handle length
-// 	memcpy(&(packet[1]), &h_len, sizeof(uint8_t));
-// 	// The Handle
-// 	memcpy(&(packet[2]), header, sizeof(uint8_t) * h_len);
-
-// 	return 2 + h_len;
-// }
-
-// Append the handle(with its length) to the stream at pos.
-int appendHandle(uint8_t * stream, uint8_t *handle)
-{
-	// Have to subtract one to remove the null character
-	uint8_t handleLen = strlen(handle);
-	memcpy(stream, &handleLen, sizeof(uint8_t));
-	memcpy(&(stream[1]), handle, sizeof(uint8_t) * handleLen);
-	return handleLen + 1;
-}
-
-// Get the next handle from a stream of bytes by finding the next space or null character.
-// Returns the handle length.
-int getNextHandle(uint8_t *stream, uint8_t *dest)
-{
-	int i = 0;
-	
-	while(!isspace(stream[i]) && stream[i] != 0) 
-	{
-		i++;
-	}
-	memcpy(dest, stream, sizeof(uint8_t) * i);
-	// Null Terminate
-	uint8_t nullTerm = '\0';
-	memcpy(&(dest[i+1]), &nullTerm, sizeof(uint8_t));
-	return i;
 }
