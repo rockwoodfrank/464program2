@@ -4,12 +4,14 @@
 #include <string.h>
 #include <ctype.h>
 
+#include "printBytes.h"
+
 uint8_t determine_flag(uint8_t* userInput, int inputLen);
 int parseDestsLen(uint8_t *buffer, int buffer_len);
 uint8_t get_word_length(uint8_t *src);
 
 // Parse the command and place it in the passed struct
-int commandParse(char *buffer, int buffer_len, Command *command)
+int commandParse(uint8_t *buffer, int buffer_len, Command *command)
 {
     int read_pos = 0;
     command->flag = determine_flag(buffer, buffer_len);
@@ -32,7 +34,7 @@ int commandParse(char *buffer, int buffer_len, Command *command)
     } else if (command->flag == PDU_UNICAST)
     {
         command->destsLen = 1;
-        read_pos = 5;
+        read_pos = 3;
         command->dests[0] = &(buffer[read_pos]);
         command->lengths[0] = get_word_length(command->dests[0]);
         read_pos += command->lengths[0] + 1;
@@ -40,7 +42,7 @@ int commandParse(char *buffer, int buffer_len, Command *command)
     // Storing the message
     // Readpos should be at the beginning of the message segment, so we'll use it to keep track
     // Of message data
-    command->msg = &(buffer[read_pos]);
+    command->msg = (uint8_t *)&(buffer[read_pos]);
     // Might need to add a +1 in there
     command->msgLen = buffer_len - read_pos;
     return 0;

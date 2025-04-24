@@ -2,6 +2,7 @@
     "files.associations": {
         "string.h": "c",
         "networks.h": "c",
-        "cstdint": "c"
+        "cstdint": "c",
+        "printbytes.h": "c"
     }
 }

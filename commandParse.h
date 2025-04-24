@@ -13,6 +13,6 @@ typedef struct Command {
     int msgLen;
 } Command;
 
-int commandParse(char *buffer, int buffer_len, Command *command);
+int commandParse(uint8_t *buffer, int buffer_len, Command *command);
 
 #endif

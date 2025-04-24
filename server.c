@@ -182,6 +182,8 @@ void route_cast(uint8_t* packet, int packetLen)
 	int num_socks;
 	// Get the handles that we're sending to
 	num_socks = get_handles(packet, send_socks);
+	printf("Recieved");
+	printBytes(packet, packetLen);
 
 	// TODO: Check that they're real
 
@@ -201,6 +203,7 @@ int get_handles(uint8_t *packet, int *socks)
 		// Add a null terminator
 		h_name[h_len] = '\0';
 		socks[i] = lookup_handle_byname(h_name);
+		if (socks[i] == -1) return -1;
 	}
 	return num_handles;
 }
