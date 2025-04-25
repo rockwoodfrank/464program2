@@ -15,5 +15,7 @@
 
 // Defining the positions of parts of the packet
 #define FLAG_LOC        0x0
+// The length of a packet telling a client how many handles there are. Should be the flag plus 4 bytes
+#define PDU_H_PACKET_LEN 5
 
 #endif

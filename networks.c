@@ -126,8 +126,8 @@ int tcpClientSetup(char * serverName, char * serverPort, int debugFlag)
 		exit(-1);
 	}
 
-	printf("Connected to %s via socket: %d IP: %s Port Number: %d\n", 
-			serverName, socket_num, getIPAddressString6(ipAddress), atoi(serverPort));
+	// printf("Connected to %s via socket: %d IP: %s Port Number: %d\n", 
+	// 		serverName, socket_num, getIPAddressString6(ipAddress), atoi(serverPort));
 		
 	return socket_num;
 }

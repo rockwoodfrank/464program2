@@ -46,6 +46,14 @@ void connect_Client(char *conn_handle, int recv_sock);
 void route_cast(uint8_t* packet, int packetLen);
 int get_handles(uint8_t *packet, int *socks);
 
+// Handle sending
+void send_handles(int socketNum);
+int send_num_handles(int socket, uint32_t num_handles);
+int send_handle(int socket, int index);
+
+// Broadcasting
+void broadcast_msg(int send_sock, int8_t *packet, int packetLen);
+
 int main(int argc, char *argv[])
 {
 	int portNumber = 0;
@@ -128,15 +136,15 @@ void processPacket(uint8_t *packet, int packetLen, int recv_sock)
 	// A switch case as for what to do next
 	if (flag == PDU_CONNECT)
 	{
-		connect_Client(conn_handle, recv_sock);
+		connect_Client((char *)conn_handle, recv_sock);
 	}
 	else if (flag == PDU_BROADCAST)
 	{
-		//
+		broadcast_msg(recv_sock, packet, packetLen);
 	}
 	else if (flag == PDU_HANDLES)
 	{
-		//
+		send_handles(recv_sock);
 	}
 	else if (flag == PDU_UNICAST || flag == PDU_MULTICAST)
 	{
@@ -147,16 +155,10 @@ void processPacket(uint8_t *packet, int packetLen, int recv_sock)
 		// Throw an error
 		// Quit the server?
 	}
-	// printf("Socket %d: Message received, length: %d, Flag: %hhu Data: ", clientSocket, messageLen, flag);
-	// printBytes(dataBuffer, messageLen);
-	
-	// messageLen = sendPDU(clientSocket, &new_data_buffer, 1);
-	// printf("Socket %d: msg sent: %d bytes, text: %s\n", clientSocket, messageLen, &new_data_buffer);
 }
 
 void connect_Client(char *conn_handle, int recv_sock)
 {
-	printf("Connecting a new client with handle %s\n", conn_handle);
 	uint8_t response;
 	// Connection code
 	// make sure the handle isn't already in the table
@@ -165,14 +167,14 @@ void connect_Client(char *conn_handle, int recv_sock)
 		response = PDU_REJECT;
 		printf("Client attempted to connect with duplicate handle.\n");
 		uint8_t response = PDU_REJECT;
-		sendPDU(recv_sock, &response, 1);
+		safeSendPDU(recv_sock, &response, 1);
 	}
 	// Adding to handle table
 	else
 	{
 		add_handle(conn_handle, recv_sock);
 		response = PDU_ACCEPT;
-		sendPDU(recv_sock, &response, 1);
+		safeSendPDU(recv_sock, &response, 1);
 	}
 }
 
@@ -182,14 +184,61 @@ void route_cast(uint8_t* packet, int packetLen)
 	int num_socks;
 	// Get the handles that we're sending to
 	num_socks = get_handles(packet, send_socks);
-	printf("Recieved");
-	printBytes(packet, packetLen);
 
 	// TODO: Check that they're real
 
 	// For each handle, send the packet
 	for (int i = 0; i < num_socks; i++)
-		sendPDU(send_socks[i], packet, packetLen);
+		safeSendPDU(send_socks[i], packet, packetLen);
+
+}
+
+void send_handles(int socketNum)
+{
+	// Get number of handles
+	uint32_t num_handles = get_num_handles();
+	// Respond with number of handles
+	send_num_handles(socketNum, num_handles);
+
+	// Sending each handle
+	int socks[num_handles];
+	get_handles_from_table(&socks);
+	for (int i = 0; i < num_handles; i++)
+		send_handle(socketNum, socks[i]);
+
+	// Sending the terminating signal
+	uint8_t term = PDU_H_TERM;
+	safeSendPDU(socketNum, &term, 1);
+}
+
+int send_num_handles(int socket, uint32_t num_handles)
+{
+	int sent = 0;
+	uint8_t packet[PDU_H_PACKET_LEN];
+	packet[0] = PDU_H_LEN;
+	uint32_t socket_n = htonl(num_handles);
+	memcpy(&(packet[1]), &socket_n, sizeof(uint32_t));
+	sent = safeSendPDU(socket, packet, PDU_H_PACKET_LEN);
+	return sent;
+}
+
+int send_handle(int send_socket, int h_socket)
+{
+	uint8_t *handle = lookup_handle_bysock(h_socket);
+	uint8_t h_len = strlen(handle);
+	uint8_t send_buffer[1+h_len];
+	int sent = 0;
+	// Adding the flag
+	send_buffer[0] = PDU_H_RESP;
+
+	// Adding the handle length
+	memcpy(&(send_buffer[1]), &h_len, sizeof(uint8_t));
+
+	// Adding the handle
+	memcpy(&(send_buffer[2]), handle, sizeof(uint8_t) * h_len);
+
+	sent = safeSendPDU(send_socket, send_buffer, h_len+2);
+	return sent; 
 }
 
 int get_handles(uint8_t *packet, int *socks)
@@ -227,3 +276,14 @@ int checkArgs(int argc, char *argv[])
 	return portNumber;
 }
 
+void broadcast_msg(int send_sock, int8_t *packet, int packetLen)
+{
+	// Get all of the the handles
+	uint32_t num_handles = get_num_handles();
+	int socks[num_handles];
+	get_handles_from_table(&socks);
+	// Cycle through the handles and send the message
+	for (int i = 0; i<num_handles; i++)
+		if (send_sock != socks[i])
+			safeSendPDU(socks[i], packet, packetLen);
+}

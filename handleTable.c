@@ -28,6 +28,7 @@ void init_handle_table()
     }
     // Clear out the arrays because of the search
     memset(names, 0, sizeof(char *) * tableSize);
+    // A zero in the socket means it does not exist
     memset(sockets, 0, sizeof(int) * tableSize);
 }
 
@@ -103,6 +104,29 @@ int remove_handle(int socketNum)
     sockets[h_index] = 0;
 
     return h_index;
+}
+
+// Returns the number of handles in the table
+u_int32_t get_num_handles()
+{
+    u_int32_t num_handles = 0;
+    for (int i = 0; i<tableSize; i++)
+    {
+        if (sockets[i] != 0)
+            num_handles++;
+    }
+    return num_handles;
+}
+
+int get_handles_from_table(int *socks)
+{
+    int iter = 0;
+    for (int i = 0; i<tableSize; i++)
+    {
+        if (sockets[i] != 0)
+            socks[iter++] = sockets[i];
+    }
+    return 0;
 }
 
 void grow_handle_table()
