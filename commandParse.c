@@ -43,7 +43,7 @@ int commandParse(uint8_t *buffer, int buffer_len, Command *command)
                 printf("Mismatch between number and destinations\n");
                 return -1;
             }
-            command->lengths[i] = strlen((char *)command->dests[0]);
+            command->lengths[i] = strlen((char *)command->dests[i]);
             if (command->lengths[i] > 100)
             {
                 printf("Invalid handle, handle longer than 100 characters: %s\n", command->dests[i]);
