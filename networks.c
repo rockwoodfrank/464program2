@@ -85,8 +85,8 @@ int tcpAccept(int mainServerSocket, int debugFlag)
 		exit(-1);
 	}
 	  
-	printf("Client accepted. Socket: %d,  Client IP: %s Client Port Number: %d\n",  
-			client_socket, getIPAddressString6(clientAddress.sin6_addr.s6_addr), ntohs(clientAddress.sin6_port));
+	// printf("Client accepted. Socket: %d,  Client IP: %s Client Port Number: %d\n",  
+	// 		client_socket, getIPAddressString6(clientAddress.sin6_addr.s6_addr), ntohs(clientAddress.sin6_port));
 
 	return(client_socket);
 }

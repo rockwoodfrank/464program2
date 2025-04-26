@@ -32,7 +32,7 @@
 #include "getPDUdata.h"
 #include "commandParse.h"
 
-#define MAXBUF 1024
+#define MAXBUF 1400
 #define DEBUG_FLAG 1
 #define MAX_HANDLE_NAME 100
 #define MAX_MESSAGE_SIZE 200
@@ -48,18 +48,19 @@ int genPackets(int socketNum, char *c_handle, Command *command);
 void processMsgFromServer(int socketNum);
 int sendConnect(int socketNum, char *handle, int h_len);
 void initConnection(char *handleName, int handleLen, int socketNum);
-int getConnectResp(int socketNum);
+int getConnectResp(int socketNum, char* handleName);
 
 // Sending
 int formatPacket(uint8_t *packet, uint8_t flag, uint8_t h_len, uint8_t *header);
 int addDestHandles(Command *command, uint8_t *out_buf);
-int sendCast(int socketNum, uint8_t *cast_header, int cast_len, Command *command, int payload_len);
+int sendCast(int socketNum, uint8_t *cast_header, int cast_len, Command *command, int payload_len, int byte_offset);
 int sendMessage(Command *command, uint8_t *packet_buffer, int packet_len);
 
 // Receiving
 void printChat(uint8_t *packet, int len);
 void handleMsg(uint8_t *packet, int len);
-void sender_name_toStr(uint8_t *packet, uint8_t *dest);
+int sender_name_toStr(uint8_t *packet, uint8_t *dest);
+void printErrorMsg(uint8_t *packet, int len);
 
 // Recieving Handles
 void receive_handles();
@@ -83,9 +84,15 @@ int main(int argc, char * argv[])
 void clientControl(char* clientHandle, char* serverName, char* serverPort)
 {
 	socketNum = 0;
+	int handleLen = strlen(clientHandle);
+	if (handleLen > 100)
+	{
+		printf("Invalid handle, handle longer than 100 characters: %s\n", clientHandle);
+		exit(-1);
+	}
 	/* set up the TCP Client socket  */
 	socketNum = tcpClientSetup(serverName, serverPort, DEBUG_FLAG);
-	int handleLen = strlen(clientHandle);
+
 
 	// Initialize the connection
 	initConnection(clientHandle, handleLen, socketNum);
@@ -116,14 +123,16 @@ void processStdIn(int socketNum, char *c_handle)
 	uint8_t stdin_buffer[MAXBUF];   //data buffer
 	int stdin_len = 0;        		//amount of data to send
 	// int sent = 0;            		//actual amount of data sent/* get the data and send it   */
-
-	// TODO: Handling messages larger than 1400 characters
 	stdin_len = readFromStdin(stdin_buffer);
-	Command currentCommand;
-	commandParse(stdin_buffer, stdin_len, &currentCommand);
-	if (currentCommand.flag != 0)
+	if (stdin_len != -1)
 	{
-		genPackets(socketNum, c_handle, &currentCommand);
+		int p_result;
+		Command currentCommand;
+		p_result = commandParse(stdin_buffer, stdin_len, &currentCommand);
+		if (currentCommand.flag != 0 && p_result == 0)
+		{
+			genPackets(socketNum, c_handle, &currentCommand);
+		}
 	}
 }
 
@@ -168,34 +177,42 @@ int sendMessage(Command *command, uint8_t *packet_buffer, int packet_len)
 	{
 		packet_len += addDestHandles(command, packet_buffer);
 	}
+	
 	// Get the message size and send multiple if needed
 	int msgLen = command->msgLen;
 	int bytesRemaining = msgLen;
-	int bytesToSend;
+	int bytePosition = 0;
 	// Becuase the greatest message size is 200 bytes, break it up if needed
-	// TODO: Handling a message that's exactly 200 bytes long(ends w/ a null character)
-	int packetsToSend = (msgLen / 200) + 1;
-	for (int i = 0; i < packetsToSend; i++)
+	while(bytesRemaining > 200)
 	{
-		if (bytesRemaining >= 200)
-			bytesToSend = 200;
-		else bytesToSend = bytesRemaining;
-		// TODO: Break thsi up into 200-sized chunks
-		sent += sendCast(socketNum, packet_buffer, packet_len, command, bytesToSend);
-		bytesRemaining -= bytesToSend;
+		sent += sendCast(socketNum, packet_buffer, packet_len, command, 200, bytePosition);
+		bytePosition += 199;
+		bytesRemaining -= 199;
 	}
+	sent += sendCast(socketNum, packet_buffer, packet_len, command, bytesRemaining, bytePosition);
 	return sent;
 }
 
-int sendCast(int socketNum, uint8_t *cast_header, int cast_len, Command *command, int payload_len)
+int sendCast(int socketNum, uint8_t *cast_header, int cast_len, Command *command, int payload_len, int byteOffset)
 {
 		// Copy over the heading info
 		uint8_t sending_buffer[cast_len + 200];
+		int sent = 0;
 		memcpy(sending_buffer, cast_header, sizeof(uint8_t) * cast_len);
 		// Append the message
-		memcpy(get_msg(sending_buffer), command->msg, sizeof(uint8_t) * payload_len);
-		// Send it off
-		int sent = safeSendPDU(socketNum, sending_buffer, cast_len+payload_len);
+		if (payload_len != 0)
+		{
+			memcpy(get_msg(sending_buffer), &(command->msg[byteOffset]), sizeof(uint8_t) * payload_len);
+			// Add the null terminator
+			sending_buffer[cast_len + payload_len-1] = '\0';
+					// Send it off
+			sent = safeSendPDU(socketNum, sending_buffer, cast_len+payload_len);
+		} else
+		{
+			// Adding a blank to be recieved on the on the other end
+			get_msg(sending_buffer)[0] = '\0';
+			sent = safeSendPDU(socketNum, sending_buffer, cast_len+payload_len+1);
+		}
 		return sent;
 }
 
@@ -206,7 +223,6 @@ int addDestHandles(Command *command, uint8_t *out_buf)
 {
 	uint8_t num_handles = command->destsLen;
 	int out_buf_len = 0;
-	// TODO: Verifying the input is a number so that the program doesn't segfault
 	// Append the number of destinations to the output
 	memcpy(get_num_dests(out_buf), &num_handles, sizeof(uint8_t));
 	out_buf_len ++;
@@ -216,7 +232,7 @@ int addDestHandles(Command *command, uint8_t *out_buf)
 		// Copy over the length of the handle
 		memcpy(get_nth_dest_len(out_buf, i), &(command->lengths[i]), sizeof(uint8_t));
 		// Copy over the handle
-		memcpy(get_nth_dest(out_buf, i), command->dests[i], sizeof(uint8_t) * command->lengths[0]);
+		memcpy(get_nth_dest(out_buf, i), command->dests[i], sizeof(uint8_t) * command->lengths[i]);
 		// Appending the length of the new handle plus 1 for its length
 		out_buf_len += *(get_nth_dest_len(out_buf, i)) + 1;
 	}
@@ -232,12 +248,11 @@ void processMsgFromServer(int socketNum)
 	recvBytes = safeRecvPDU(socketNum, buffer, MAXBUF);
 	if (recvBytes > 0)
 	{
-		// printf("Socket %d: Byte recv: %d message: %s\n", socketNum, recvBytes, buffer);
 		handleMsg(buffer, recvBytes);
 	}
 	else
 	{
-		printf("Server terminated\n");
+		printf("Server Terminated\n");
 		exit(-1);
 	}
 }
@@ -249,6 +264,7 @@ void handleMsg(uint8_t *packet, int len)
 	if (flag == PDU_ERROR)
 	{
 		//
+		printErrorMsg(packet, len);
 	}
 	// Chat message
 	else if (flag == PDU_UNICAST || flag == PDU_MULTICAST || flag == PDU_BROADCAST)
@@ -272,11 +288,12 @@ void printChat(uint8_t *packet, int len)
 	printf("\n%s: %s\n", sender, get_msg(packet));
 }
 
-void sender_name_toStr(uint8_t *packet, uint8_t *dest)
+int sender_name_toStr(uint8_t *packet, uint8_t *dest)
 {
 	uint8_t sender_len = *(get_src_len(packet));
 	memcpy(dest, get_src(packet), sizeof(uint8_t) * sender_len);
 	dest[sender_len] = '\0';
+	return sender_len;
 }
 
 int readFromStdin(uint8_t * buffer)
@@ -296,6 +313,15 @@ int readFromStdin(uint8_t * buffer)
 			inputLen++;
 		}
 	}
+
+	// Checking for a buffer overflow
+	if (aChar != '\n')
+	{
+		printf("Message too long\n");
+		// Dump the rest
+		while (getchar() != '\n');
+		return -1;
+	}
 	
 	// Null terminate the string
 	buffer[inputLen] = '\0';
@@ -312,7 +338,6 @@ void checkArgs(int argc, char * argv[])
 		printf("usage: %s handle server-name server-port \n", argv[0]);
 		exit(1);
 	}
-	// TODO: verifying the handle name is less than the max length
 }
 
 
@@ -341,11 +366,11 @@ void initConnection(char *handleName, int handleLen, int socketNum)
 
 	// Block until a 2 or 3 is received
 	int response = 0;
-	while (response != PDU_ACCEPT) response = getConnectResp(socketNum);
+	while (response != PDU_ACCEPT) response = getConnectResp(socketNum, handleName);
 }
 
 // Getting the connection response from the server
-int getConnectResp(int socketNum)
+int getConnectResp(int socketNum, char* handleName)
 {
 	// int recvBytes = 0;
 	uint8_t buffer[MAXBUF];   //data buffer
@@ -356,7 +381,7 @@ int getConnectResp(int socketNum)
 	// 3? stop program
 	if (serverResp == PDU_REJECT)
 	{
-		perror("Server rejected client");
+		printf("Handle already in use: \n");
 		exit(3);
 	}
 	// 2? allow connection
@@ -373,7 +398,6 @@ void receive_handles()
 
 	recvBytes = safeRecvPDU(socketNum, buffer, MAXBUF);
 	// Print the length of the handle list
-	// TODO: Verify that the message has the correct flag
 	print_htable_len(buffer);
 
 	uint8_t recv_Flag = 0;    
@@ -410,4 +434,14 @@ void print_handle(uint8_t *buffer)
 	memcpy(handle_str, handle, sizeof(uint8_t) * h_len);
 	handle_str[h_len] = '\0';
 	printf("\t%s\n", handle_str);
+}
+
+void printErrorMsg(uint8_t *packet, int len)
+{
+	uint8_t handleLen = *(get_src_len(packet));
+	uint8_t handle[handleLen+1];
+	memcpy(handle, get_src(packet), sizeof(uint8_t) * handleLen);
+	handle[handleLen] = '\0';
+
+	printf("\nClient with handle %s does not exist\n", handle);
 }

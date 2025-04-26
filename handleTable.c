@@ -98,7 +98,7 @@ int remove_handle(int socketNum)
     for (int i = 0; i < tableSize; i++)
         if (sockets[i] == socketNum)
             h_index = i;
-
+    if (h_index == -1) return -1;
     free(names[h_index]);
     names[h_index] = NULL;
     sockets[h_index] = 0;

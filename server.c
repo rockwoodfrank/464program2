@@ -43,8 +43,8 @@ void processClient(int clientSocket);
 void handle_msg(uint8_t *packet, int packetLen, int send_sock);
 void processPacket(uint8_t *packet, int packetLen, int recv_sock);
 void connect_Client(char *conn_handle, int recv_sock);
-void route_cast(uint8_t* packet, int packetLen);
-int get_handles(uint8_t *packet, int *socks);
+void route_cast(int src_sock, uint8_t* packet, int packetLen);
+int get_handles(int src_sock, uint8_t *packet, int *socks);
 
 // Handle sending
 void send_handles(int socketNum);
@@ -52,7 +52,10 @@ int send_num_handles(int socket, uint32_t num_handles);
 int send_handle(int socket, int index);
 
 // Broadcasting
-void broadcast_msg(int send_sock, int8_t *packet, int packetLen);
+void broadcast_msg(int send_sock, uint8_t *packet, int packetLen);
+
+// Error sending
+void send_error(int src_sock, uint8_t *bad_hname, uint8_t hname_len);
 
 int main(int argc, char *argv[])
 {
@@ -118,7 +121,8 @@ void processClient(int clientSocket)
 	}
 	else
 	{
-		printf("Socket %d: Connection closed by other side\n", clientSocket);
+		// printf("Socket %d: Connection closed by other side\n", clientSocket);
+		remove_handle(clientSocket);
 		removeFromPollSet(clientSocket);
 		close(clientSocket);
 	}
@@ -126,7 +130,6 @@ void processClient(int clientSocket)
 
 void processPacket(uint8_t *packet, int packetLen, int recv_sock)
 {
-	// TODO: Error checking
 	uint8_t conn_handle[MAX_HANDLE_LENGTH];
 	uint8_t flag = *(get_flag(packet));
 	uint8_t handle_len = *(get_src_len(packet));
@@ -148,7 +151,7 @@ void processPacket(uint8_t *packet, int packetLen, int recv_sock)
 	}
 	else if (flag == PDU_UNICAST || flag == PDU_MULTICAST)
 	{
-		route_cast(packet, packetLen);
+		route_cast(recv_sock, packet, packetLen);
 	}
 	else
 	{
@@ -178,18 +181,17 @@ void connect_Client(char *conn_handle, int recv_sock)
 	}
 }
 
-void route_cast(uint8_t* packet, int packetLen)
+void route_cast(int src_sock, uint8_t* packet, int packetLen)
 {
 	int send_socks[9];
 	int num_socks;
 	// Get the handles that we're sending to
-	num_socks = get_handles(packet, send_socks);
-
-	// TODO: Check that they're real
+	num_socks = get_handles(src_sock, packet, send_socks);
 
 	// For each handle, send the packet
 	for (int i = 0; i < num_socks; i++)
-		safeSendPDU(send_socks[i], packet, packetLen);
+		if (send_socks[i] != -1)
+			safeSendPDU(send_socks[i], packet, packetLen);
 
 }
 
@@ -224,7 +226,7 @@ int send_num_handles(int socket, uint32_t num_handles)
 
 int send_handle(int send_socket, int h_socket)
 {
-	uint8_t *handle = lookup_handle_bysock(h_socket);
+	char *handle = lookup_handle_bysock(h_socket);
 	uint8_t h_len = strlen(handle);
 	uint8_t send_buffer[1+h_len];
 	int sent = 0;
@@ -241,7 +243,7 @@ int send_handle(int send_socket, int h_socket)
 	return sent; 
 }
 
-int get_handles(uint8_t *packet, int *socks)
+int get_handles(int src_sock, uint8_t *packet, int *socks)
 {
 	int num_handles = *(get_num_dests(packet));
 	for (int i = 0; i < num_handles; i++)
@@ -251,8 +253,14 @@ int get_handles(uint8_t *packet, int *socks)
 		memcpy(h_name, get_nth_dest(packet, i), h_len);
 		// Add a null terminator
 		h_name[h_len] = '\0';
-		socks[i] = lookup_handle_byname(h_name);
-		if (socks[i] == -1) return -1;
+
+		int sock_ret = lookup_handle_byname((char *)h_name);
+		if (sock_ret == -1) 
+		{
+			send_error(src_sock, h_name, h_len);
+			socks[i] = -1;
+		}
+		else socks[i] = sock_ret;
 	}
 	return num_handles;
 }
@@ -276,7 +284,7 @@ int checkArgs(int argc, char *argv[])
 	return portNumber;
 }
 
-void broadcast_msg(int send_sock, int8_t *packet, int packetLen)
+void broadcast_msg(int send_sock, uint8_t *packet, int packetLen)
 {
 	// Get all of the the handles
 	uint32_t num_handles = get_num_handles();
@@ -286,4 +294,14 @@ void broadcast_msg(int send_sock, int8_t *packet, int packetLen)
 	for (int i = 0; i<num_handles; i++)
 		if (send_sock != socks[i])
 			safeSendPDU(socks[i], packet, packetLen);
+}
+
+void send_error(int src_sock, uint8_t *bad_hname, uint8_t hname_len)
+{
+	uint8_t buffer[hname_len+2];
+	// Add the flag
+	buffer[0] = PDU_ERROR;
+	buffer[1] = hname_len;
+	memcpy(&(buffer[2]), bad_hname, sizeof(uint8_t) * hname_len);
+	safeSendPDU(src_sock, buffer, hname_len+2);
 }

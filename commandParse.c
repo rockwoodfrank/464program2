@@ -8,43 +8,57 @@
 
 uint8_t determine_flag(uint8_t* userInput, int inputLen);
 int parseDestsLen(uint8_t *buffer, int buffer_len);
-uint8_t get_word_length(uint8_t *src);
 
 // Parse the command and place it in the passed struct
 int commandParse(uint8_t *buffer, int buffer_len, Command *command)
 {
-    int read_pos = 0;
     command->flag = determine_flag(buffer, buffer_len);
     if (command->flag == 0) return -1;
     else if (command->flag == PDU_HANDLES) return 0;
-    if (command->flag == PDU_MULTICAST)
+    // Verifying the length to prevent a segfault
+    if ((buffer_len < 5) && command->flag != PDU_BROADCAST)
     {
-        command->destsLen = parseDestsLen(buffer, buffer_len);
+        printf("Invalid command format\n");
+        return -1;
+    }
+    if (command->flag == PDU_MULTICAST || command->flag == PDU_UNICAST)
+    {
+        if (command->flag == PDU_MULTICAST)
+        {
+            command->destsLen = parseDestsLen(buffer, buffer_len);
+            // Verify a number was entered
+            if(command->destsLen < 1 || command->destsLen > 9)
+            {
+                printf("Enter a number of destinations between 1 and 9.\n");
+                return -1;
+            }
+        } else command->destsLen = 1;
         // grab each dest
-        read_pos = 5;
         for (int i = 0; i<(command->destsLen); i++)
         {
-            uint8_t *buf = &(buffer[read_pos]);
-            uint8_t h_len = get_word_length(buf);
             // Generate a new char array for each so they can be treated like strings
-            command->dests[i] = buf;
-            command->lengths[i]=h_len;
-            read_pos += h_len + 1;
+            command->dests[i] = strtok(NULL, " ");
+            if (command->dests == NULL)
+            {
+                printf("Mismatch between number and destinations\n");
+                return -1;
+            }
+            command->lengths[i] = strlen((char *)command->dests[0]);
+            if (command->lengths[i] > 100)
+            {
+                printf("Invalid handle, handle longer than 100 characters: %s\n", command->dests[i]);
+                return -1;
+            }
         }
-    } else if (command->flag == PDU_UNICAST)
-    {
-        command->destsLen = 1;
-        read_pos = 3;
-        command->dests[0] = &(buffer[read_pos]);
-        command->lengths[0] = get_word_length(command->dests[0]);
-        read_pos += command->lengths[0] + 1;
     }
     // Storing the message
     // Readpos should be at the beginning of the message segment, so we'll use it to keep track
     // Of message data
-    command->msg = (uint8_t *)&(buffer[read_pos]);
-    // Might need to add a +1 in there
-    command->msgLen = buffer_len - read_pos;
+
+    command->msg = strtok(NULL, "\n");
+    // Checking for empty messages
+    if (command->msg == NULL) command->msgLen = 0;
+    else command->msgLen = strlen(command->msg) + 1;
     return 0;
 }
 
@@ -55,41 +69,32 @@ uint8_t determine_flag(uint8_t* userInput, int inputLen)
 	// and verify the input begins with a percent sign
 	if (inputLen < 3 || userInput[0] != '%')
 	{
-		printf("Enter a commanded preceded by %%.\n");
+		printf("Invalid command\n");
 		return 0;
 	}
+    char *flag = strtok((char*)userInput, " ");
 	// %M - Messsages
-	if (userInput[1] == 'M' || userInput[1] == 'm')
+	if ((strcmp(flag, "%M") == 0) ||(strcmp(flag, "%m") == 0))
 		return PDU_UNICAST;
 	// %B - Broadcast
-	else if (userInput[1] == 'B' || userInput[1] == 'b')
+	else if ((strcmp(flag, "%B") == 0)|| (strcmp(flag, "%b") == 0))
 		return PDU_BROADCAST;
 	// %C - Multicast
-	else if (userInput[1] == 'C' || userInput[1] == 'c')
+	else if ((strcmp(flag, "%C") == 0)|| (strcmp(flag, "%c") == 0))
 		return PDU_MULTICAST;
 	// %L - List
-	else if (userInput[1] == 'L' || userInput[1] == 'l')
+	else if ((strcmp(flag, "%L") == 0) || (strcmp(flag, "%l") == 0))
 		return PDU_HANDLES;
 	else 
 	{
-		printf("Enter %%M, %%B, %%C, or %%L.\n");
+		printf("Invalid command\n");
 		return 0;
 	}
 }
 
 int parseDestsLen(uint8_t *buffer, int buffer_len)
 {
-    // TODO: error checing
     // The number will be 4th item
-    int numDests = buffer[3] - '0';
+    int numDests = strtok(NULL, " ")[0] - '0';
     return numDests;
-}
-
-// Using iu8s because the word length shouldn't be over 100
-uint8_t get_word_length(uint8_t *src)
-{
-    uint8_t i = 0;
-    // TODO: Error on word length greater than 100
-	while(!isspace(src[i]) && src[i] != 0) i++;
-    return i;
 }
