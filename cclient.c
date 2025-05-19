@@ -1,5 +1,5 @@
 /******************************************************************************
-* cClient.c
+* cclient.c
 *
 * Adapted from code by Prof. Smith
 * Written by Rockwood Frank - Apr 2025
