@@ -9,6 +9,7 @@ OBJS = networks.o gethostbyname.o pollLib.o safeUtil.o pdu.o safePDU.o printByte
 
 all:   cclient server
 
+# CHANGED CODE: Modified the name of cclient
 cclient: cclient.c $(OBJS)
 	$(CC) $(CFLAGS) -o cclient cclient.c  $(OBJS) $(LIBS)
 
