@@ -10,7 +10,8 @@
 int sendPDU(int clientSocket, uint8_t * dataBuffer, int lengthOfData)
 {
     // Generating the bytes to send
-    uint16_t pdu_len_h = lengthOfData;
+    // MODIFIED CODE: Added the header length to the code
+    uint16_t pdu_len_h = lengthOfData + 2;
     uint16_t pdu_len_n = htons(pdu_len_h);
 
     // Generating the packet
@@ -46,7 +47,8 @@ int recvPDU(int socketNumber, uint8_t * dataBuffer, int bufferSize)
         exit(-1);
     }
 
-    uint16_t pdu_len_h = ntohs(pdu_len_n);
+    // MODIFIED CODE: Added the header length to the code
+    uint16_t pdu_len_h = ntohs(pdu_len_n) - 2;
 
     // Checking that the buffer is large enough to store the data
     if (bufferSize < pdu_len_h)
